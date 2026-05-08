@@ -1,0 +1,14 @@
+{
+  "name": "spain-egg-scraper",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Quarterly egg-listing scraper for Spain top-5 retailers",
+  "scripts": {
+    "scrape": "node run_scrape.mjs",
+    "compare": "node compare.mjs"
+  },
+  "dependencies": {
+    "cheerio": "^1.0.0",
+    "playwright": "^1.59.1"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "retailer": "Carrefour",
+  "source_url": "https://www.carrefour.es/supermercado/la-despensa/huevos/cat20021/c",
+  "captured_at": "2026-05-04",
+  "captured_via": "Claude in Chrome (real browser session); Node fetch returns 403 (Cloudflare)",
+  "delivery_postcode": "28232 (Madrid)",
+  "products": [
+    {"name": "Huevos Frescos Carrefour El Mercado 24 ud.", "price": "5,59 €", "unit_price": "2,79 €/docena", "tipo_produccion": "Suelo", "otras_menciones": "Huevos de gallinas criadas en suelo"},
+    {"name": "Huevos camperos Pazo de Vilane 12 ud.", "price": "4,38 €", "unit_price": "4,38 €/docena", "tipo_produccion": "Campero", "otras_menciones": ""},
+    {"name": "Huevos Camperos Círculo de Calidad 6 ud", "price": "2,40 €", "unit_price": "4,80 €/docena", "tipo_produccion": "Campero", "otras_menciones": "Ausencia de residuos o sustancias no autorizadas."},
+    {"name": "Huevos Frescos Carrefour El Mercado 12 ud.", "price": "3,19 €", "unit_price": "3,19 €/docena", "tipo_produccion": "Suelo", "otras_menciones": "Huevos de gallinas criadas en suelo"},
+    {"name": "Huevos Camperos Círculo de Calidad 12 ud.", "price": "3,99 €", "unit_price": "3,99 €/docena", "tipo_produccion": "Campero", "otras_menciones": "Ausencia de residuos o sustancias no autorizadas."},
+    {"name": "Huevos Ecológicos Carrefour Bio 10 ud.", "price": "4,69 € 4,45 €", "unit_price": "5,63 €/docena | 5,34 €/docena", "tipo_produccion": "Ecológicos", "otras_menciones": "Ausencia de residuos o sustancias no autorizadas."},
+    {"name": "Clara de huevo pasteurizada Carrefour Classic' 1 l.", "price": "2,85 €", "unit_price": "2,85 €/l", "tipo_produccion": "", "otras_menciones": ""},
+    {"name": "Huevos M-L ecológicos Carrefour Bio 6 ud.", "price": "2,85 €", "unit_price": "5,70 €/docena", "tipo_produccion": "Ecológicos", "otras_menciones": ""},
+    {"name": "Huevos Frescos Carrefour El Mercado 12 ud. (variant 2)", "price": "4,28 €", "unit_price": "4,28 €/docena", "tipo_produccion": "Suelo", "otras_menciones": "Huevos de gallinas criadas en suelo"},
+    {"name": "Clara de huevo líquido pasteurizado Roig 500 g", "price": "3,44 €", "unit_price": "6,88 €/kg", "tipo_produccion": "Suelo", "otras_menciones": "Clase L. Categoría A. Explicación del código marcado del huevo."},
+    {"name": "Huevos de gallinas criadas en suelo Carrefour El Mercado 6 ud.", "price": "1,75 €", "unit_price": "3,50 €/docena", "tipo_produccion": "Suelo", "otras_menciones": "Huevos frescos Carrefour suelo L 6h"},
+    {"name": "Huevos L-M camperos Granjas Villarreal 6 ud", "price": "2,30 €", "unit_price": "4,60 €/docena", "tipo_produccion": "Campero", "otras_menciones": ""},
+    {"name": "Huevos de codorniz Dagu 18 ud.", "price": "1,85 €", "unit_price": "1,23 €/docena", "tipo_produccion": "Jaula", "otras_menciones": "Huevos de Codorniz"},
+    {"name": "Clara de huevo pasteurizada Carrefour Classic' 320 ml.", "price": "1,82 €", "unit_price": "5,69 €/l", "tipo_produccion": "", "otras_menciones": ""}
+  ]
+}

@@ -1,0 +1,7 @@
+retailer,total_listings,shell_egg_listings,organic,free_range,barn,caged,unknown,cage_free_listings,cage_free_share_strict_pct,cage_free_share_resolved_pct,note
+Carrefour,15,11,2,4,5,0,0,11,100,100,
+Mercadona,11,7,0,2,0,4,1,2,29,33,
+Lidl,0,0,0,0,0,0,0,0,,,Lidl.es online catalogue does not include fresh shell eggs (in-store only). Cage-free status: 100% per EggTrack 2024 (Leader) and OBA April 2025 audit.
+Eroski,26,22,2,4,8,1,7,14,64,93,
+Caprabo,20,19,5,3,9,0,2,17,89,100,
+DIA,10,10,1,1,4,0,4,6,60,100,
