@@ -1,7 +1,7 @@
 """Render the two report figures from scraper/data/comparison/<quarter>_comparison.json.
 
 Figure 1: stacked horizontal bar of SKU production-code mix by retailer.
-Figure 2: box-and-whisker of listings cage-free estimates vs prior 50% CI.
+Figure 2: paired-dot chart of listings cage-free estimates vs prior 50% CI.
 
 Run from project root:
     python scripts/make_figures.py 2026-Q2
@@ -29,9 +29,7 @@ COLOR_BARN       = "#88CCEE"   # pale blue (still cage-free)
 COLOR_CAGED      = "#CC6677"   # muted red
 COLOR_UNKNOWN    = "#BBBBBB"   # neutral grey
 COLOR_PRIOR      = "#332288"   # navy for prior central + CI
-COLOR_BOX_IN     = "#117733"   # green box if listings central inside prior 50% CI
-COLOR_BOX_OUT    = "#CC6677"   # red box if outside
-COLOR_MEDIAN     = "#DDAA33"   # amber for median line inside box
+COLOR_STRICT     = "#DDAA33"   # amber for strict-estimate triangles
 
 
 def quarter_tag_default() -> str:
@@ -106,14 +104,14 @@ def fig1_sku_mix_v2(summary_rows: list[dict], out: Path, tag: str) -> None:
     plt.close(fig)
 
 
-def fig2_box_whisker(comparison_rows: list[dict], out: Path, tag: str) -> None:
-    """Box-and-whisker of listings cage-free estimates vs prior 50% CI.
+def fig2_paired_dots(comparison_rows: list[dict], out: Path, tag: str) -> None:
+    """Paired-dot chart: listings estimates vs prior.
 
     For each retailer with both listings and a prior:
-      - Box spans from strict estimate (q1) to Bayesian(1,1) base case (q3)
-      - Median line inside the box = Bayesian(1,2) informed prior
-      - Whiskers = Wilson 95% CI bounds
-      - Prior shown as a separate blue circle with 50% CI error bars
+      - Green square = Bayes(1,2) informed estimate (prior mean 1/3)
+      - Amber triangle = strict estimate, with Wilson 95% CI whiskers
+      - Blue circle = prior central, with 50% CI error bars
+      - Gap annotation in pp on the right margin
     """
     rows = [r for r in comparison_rows
             if r.get("listings_central_pct") is not None
@@ -122,17 +120,16 @@ def fig2_box_whisker(comparison_rows: list[dict], out: Path, tag: str) -> None:
     order = ["Mercadona", "Carrefour", "Lidl", "Eroski", "Caprabo", "DIA"]
     rows = sorted(rows, key=lambda r: order.index(r["retailer"]) if r["retailer"] in order else 99)
 
-    fig, ax = plt.subplots(figsize=(9, 4.5), dpi=300)
+    fig, ax = plt.subplots(figsize=(9, 4.0), dpi=300)
     retailers = [r["retailer"] for r in rows]
     y_positions = list(range(len(retailers)))
 
     for yi, r in zip(y_positions, rows):
         prior_pct = r["prior_estimate_pct"]
         prior_lo, prior_hi = (int(s) for s in r["prior_estimate_50ci"].split("-"))
+        central = r["listings_central_pct"]
+        informed = r.get("listings_central_informed_pct", central)
         strict = r["listings_cf_strict_pct"]
-        central = r["listings_central_pct"]       # Bayes(1,1) -- box upper edge
-        informed = r.get("listings_central_informed_pct", central)  # Bayes(1,2) -- median line
-        in_band = r["central_in_prior_50ci"]
 
         strict_ci_str = r.get("listings_cf_strict_95ci", "")
         if strict_ci_str:
@@ -140,46 +137,32 @@ def fig2_box_whisker(comparison_rows: list[dict], out: Path, tag: str) -> None:
         else:
             wilson_lo, wilson_hi = strict, strict
 
-        # Extend whiskers to cover both Wilson CI and box edges
-        whisker_lo = min(wilson_lo, strict)
-        whisker_hi = max(wilson_hi, central)
+        # Strict estimate with Wilson 95% CI
+        ax.errorbar(strict, yi - 0.18, xerr=[[strict - wilson_lo], [wilson_hi - strict]],
+                     fmt="^", color=COLOR_STRICT, markersize=7, capsize=4, capthick=1.2,
+                     elinewidth=1.2, zorder=4)
 
-        box_color = COLOR_BOX_IN if in_band else COLOR_BOX_OUT
+        # Listings informed estimate (no whiskers -- point estimate only)
+        ax.plot(informed, yi, "s", color=COLOR_ORGANIC, markersize=8, zorder=5)
 
-        # Draw box-and-whisker using matplotlib bxp (pre-computed stats)
-        box_stats = [{
-            "whislo": whisker_lo,
-            "q1": strict,
-            "med": informed,
-            "q3": central,
-            "whishi": whisker_hi,
-            "fliers": [],
-        }]
-        bp = ax.bxp(box_stats, positions=[yi - 0.12], vert=False, widths=0.38,
-                     patch_artist=True, showfliers=False,
-                     boxprops=dict(facecolor=box_color, alpha=0.35, edgecolor=box_color, linewidth=1.5),
-                     medianprops=dict(color=COLOR_MEDIAN, linewidth=2.0),
-                     whiskerprops=dict(color="#555555", linewidth=1.0),
-                     capprops=dict(color="#555555", linewidth=1.0))
-
-        # Prior: blue circle with 50% CI error bars, slightly below the box
-        ax.errorbar(prior_pct, yi + 0.22, xerr=[[prior_pct - prior_lo], [prior_hi - prior_pct]],
+        # Prior central with 50% CI error bars
+        ax.errorbar(prior_pct, yi + 0.18, xerr=[[prior_pct - prior_lo], [prior_hi - prior_pct]],
                      fmt="o", color=COLOR_PRIOR, markersize=7, capsize=4, capthick=1.2,
                      elinewidth=1.2, zorder=5)
 
-        # Gap annotation
+        # Gap annotation (informed minus prior)
         gap = r["diff_central_minus_prior_pp"]
         if gap is not None:
             sign = "+" if gap > 0 else ""
             ax.text(108, yi, f"{sign}{gap} pp", va="center", ha="left",
-                    fontsize=9, color=box_color, fontweight="bold" if abs(gap) >= 10 else "normal")
+                    fontsize=9, color="#333333", fontweight="bold" if abs(gap) >= 10 else "normal")
 
     ax.set_yticks(y_positions)
     ax.set_yticklabels(retailers)
     ax.invert_yaxis()
     ax.set_xlim(0, 107)
     ax.set_xlabel("Cage-free share (%)")
-    ax.set_title(f"Listings cage-free estimates vs prior  --  {tag}")
+    ax.set_title(f"Listings estimates vs prior  --  {tag}")
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     ax.grid(axis="x", alpha=0.25, linestyle=":")
@@ -187,18 +170,15 @@ def fig2_box_whisker(comparison_rows: list[dict], out: Path, tag: str) -> None:
 
     # Legend
     legend_items = [
-        mpatches.Patch(facecolor=COLOR_BOX_IN, alpha=0.35, edgecolor=COLOR_BOX_IN,
-                       label="Listings range (strict to Bayes base) -- consistent"),
-        mpatches.Patch(facecolor=COLOR_BOX_OUT, alpha=0.35, edgecolor=COLOR_BOX_OUT,
-                       label="Listings range -- inconsistent with prior"),
-        plt.Line2D([0], [0], color=COLOR_MEDIAN, linewidth=2, label="Bayes(1,2) informed estimate"),
-        plt.Line2D([0], [0], color="#555555", linewidth=1.0,
-                   label="Wilson 95% CI whiskers"),
+        plt.Line2D([0], [0], marker="s", color=COLOR_ORGANIC, markersize=8, linestyle="None",
+                   label="Listings Bayes(1,2) informed estimate"),
+        plt.Line2D([0], [0], marker="^", color=COLOR_STRICT, markersize=7, linestyle="None",
+                   label="Listings strict (Wilson 95% CI)"),
         plt.Line2D([0], [0], marker="o", color=COLOR_PRIOR, markersize=7, linestyle="None",
-                   label="Prior central (50% CI error bars)"),
+                   label="Prior central (50% CI)"),
     ]
-    ax.legend(handles=legend_items, loc="lower center", bbox_to_anchor=(0.5, -0.35),
-              ncol=2, frameon=False, fontsize=8)
+    ax.legend(handles=legend_items, loc="lower center", bbox_to_anchor=(0.5, -0.25),
+              ncol=3, frameon=False, fontsize=8)
 
     fig.tight_layout()
     fig.savefig(out, bbox_inches="tight", dpi=300)
@@ -217,7 +197,7 @@ def main() -> None:
     out2 = out_dir / f"fig2_listings_vs_prior_{tag}.png"
 
     fig1_sku_mix_v2(summary_rows, out1, tag)
-    fig2_box_whisker(comparison_rows, out2, tag)
+    fig2_paired_dots(comparison_rows, out2, tag)
 
     print(f"Wrote {out1}")
     print(f"Wrote {out2}")
