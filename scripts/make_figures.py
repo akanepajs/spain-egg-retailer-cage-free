@@ -1,7 +1,7 @@
 """Render the two report figures from scraper/data/comparison/<quarter>_comparison.json.
 
 Figure 1: stacked horizontal bar of SKU production-code mix by retailer.
-Figure 2: listings cage-free central vs prior 50% CI dumbbell, by retailer.
+Figure 2: box-and-whisker of listings cage-free estimates vs prior 50% CI.
 
 Run from project root:
     python scripts/make_figures.py 2026-Q2
@@ -28,10 +28,10 @@ COLOR_FREE_RANGE = "#44AA99"   # teal
 COLOR_BARN       = "#88CCEE"   # pale blue (still cage-free)
 COLOR_CAGED      = "#CC6677"   # muted red
 COLOR_UNKNOWN    = "#BBBBBB"   # neutral grey
-COLOR_PRIOR_BAND = "#DDDDDD"
-COLOR_INSIDE     = "#117733"   # green dot if listings central inside prior 50% CI
-COLOR_OUTSIDE    = "#CC6677"   # red dot if outside
-COLOR_REPORTED   = "#332288"   # navy for reported / prior central
+COLOR_PRIOR      = "#332288"   # navy for prior central + CI
+COLOR_BOX_IN     = "#117733"   # green box if listings central inside prior 50% CI
+COLOR_BOX_OUT    = "#CC6677"   # red box if outside
+COLOR_MEDIAN     = "#DDAA33"   # amber for median line inside box
 
 
 def quarter_tag_default() -> str:
@@ -44,38 +44,8 @@ def load(tag: str, root: Path) -> list[dict]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def fig1_sku_mix(rows: list[dict], out: Path, tag: str) -> None:
-    """Stacked horizontal bar — SKU code mix per retailer (excludes Eroski Group rollup)."""
-    rows = [r for r in rows if r["retailer"] != "Eroski Group" and (r.get("shell_egg_listings") or 0) > 0]
-    rows = sorted(rows, key=lambda r: r["shell_egg_listings"], reverse=True)
-
-    retailers = [r["retailer"] for r in rows]
-    n = [r["shell_egg_listings"] for r in rows]
-
-    # Each retailer's SKU mix as percentages of n.
-    def pct(r, k):
-        return 100.0 * r.get(k, 0) / r["shell_egg_listings"] if r["shell_egg_listings"] else 0.0
-
-    organic    = [pct(r, "organic")    for r in rows]
-    free_range = [pct(r, "free_range") for r in rows]
-    barn       = [pct(r, "barn")       for r in rows]
-    caged      = [pct(r, "caged_skus") for r in rows]
-    unknown    = [pct(r, "unknown_skus") for r in rows]
-
-    # Read the SKU code counts back from the source data so the function can use either
-    # the comparison-row schema (cage_free_skus split) or the summary-row schema.
-    # The comparison rows have organic/free_range/barn rolled up into cage_free_skus,
-    # so we need to load the per-row breakdown from the summary file.
-    pass  # handled below by reading summary
-
-    # For organic/free_range/barn split we need the per-summary row; the comparison
-    # row only has cage_free_skus. Load the summary file alongside.
-
-    return retailers, n, organic, free_range, barn, caged, unknown
-
-
 def fig1_sku_mix_v2(summary_rows: list[dict], out: Path, tag: str) -> None:
-    """Stacked horizontal bar — SKU code mix per retailer.
+    """Stacked horizontal bar -- SKU code mix per retailer.
 
     Uses the summary file (organic/free_range/barn split). Excludes Lidl
     (no shell-egg listings online) and the Eroski Group rollup.
@@ -122,7 +92,7 @@ def fig1_sku_mix_v2(summary_rows: list[dict], out: Path, tag: str) -> None:
     ax.invert_yaxis()
     ax.set_xlim(0, 100)
     ax.set_xlabel("Share of chicken shell-egg SKUs (%)")
-    ax.set_title(f"Production-code mix by retailer  —  {tag} listings snapshot")
+    ax.set_title(f"Production-code mix by retailer  --  {tag} listings snapshot")
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     ax.grid(axis="x", alpha=0.25, linestyle=":")
@@ -136,86 +106,97 @@ def fig1_sku_mix_v2(summary_rows: list[dict], out: Path, tag: str) -> None:
     plt.close(fig)
 
 
-def fig2_central_vs_prior(comparison_rows: list[dict], out: Path, tag: str) -> None:
-    """Listings central (Bayesian-shrunk) vs prior 50% CI for each retailer.
+def fig2_box_whisker(comparison_rows: list[dict], out: Path, tag: str) -> None:
+    """Box-and-whisker of listings cage-free estimates vs prior 50% CI.
 
     For each retailer with both listings and a prior:
-      - draw the prior 50% CI as a horizontal grey band, with the prior central as a navy circle
-      - draw the listings strict-95% CI as a black whisker
-      - mark the listings Bayes(1,1) central (base case) as a coloured square (green if inside the prior 50% CI, red if outside)
-      - mark the listings Bayes(1,2) informed-prior central as a black diamond
-      - annotate the gap (central minus prior) in pp
+      - Box spans from strict estimate (q1) to Bayesian(1,1) base case (q3)
+      - Median line inside the box = Bayesian(1,2) informed prior
+      - Whiskers = Wilson 95% CI bounds
+      - Prior shown as a separate blue circle with 50% CI error bars
     """
-    rows = [r for r in comparison_rows if r.get("listings_central_pct") is not None and r.get("prior_estimate_pct") is not None]
-    # Sort by retailer egg-volume rank for visual narrative (largest at top).
+    rows = [r for r in comparison_rows
+            if r.get("listings_central_pct") is not None
+            and r.get("prior_estimate_pct") is not None]
     order = ["Mercadona", "Carrefour", "Lidl", "Eroski", "Caprabo", "DIA", "Eroski Group"]
     rows = sorted(rows, key=lambda r: order.index(r["retailer"]) if r["retailer"] in order else 99)
 
     fig, ax = plt.subplots(figsize=(9, 4.5), dpi=300)
     retailers = [r["retailer"] for r in rows]
-    y = list(range(len(retailers)))
+    y_positions = list(range(len(retailers)))
 
-    for yi, r in zip(y, rows):
-        prior_lo, prior_hi = (int(s) for s in r["prior_estimate_50ci"].split("-"))
+    for yi, r in zip(y_positions, rows):
         prior_pct = r["prior_estimate_pct"]
-        central = r["listings_central_pct"]
-        informed = r.get("listings_central_informed_pct", central)
-        strict_pct = r["listings_cf_strict_pct"]
+        prior_lo, prior_hi = (int(s) for s in r["prior_estimate_50ci"].split("-"))
+        strict = r["listings_cf_strict_pct"]
+        central = r["listings_central_pct"]       # Bayes(1,1) -- box upper edge
+        informed = r.get("listings_central_informed_pct", central)  # Bayes(1,2) -- median line
+        in_band = r["central_in_prior_50ci"]
+
         strict_ci_str = r.get("listings_cf_strict_95ci", "")
         if strict_ci_str:
-            strict_lo, strict_hi = (int(s) for s in strict_ci_str.split("-"))
+            wilson_lo, wilson_hi = (int(s) for s in strict_ci_str.split("-"))
         else:
-            strict_lo, strict_hi = strict_pct, strict_pct
+            wilson_lo, wilson_hi = strict, strict
 
-        in_band = r["central_in_prior_50ci"]
-        central_color = COLOR_INSIDE if in_band else COLOR_OUTSIDE
+        # Extend whiskers to cover both Wilson CI and box edges
+        whisker_lo = min(wilson_lo, strict)
+        whisker_hi = max(wilson_hi, central)
 
-        # Prior 50% CI as a horizontal band
-        ax.add_patch(mpatches.Rectangle((prior_lo, yi - 0.30), prior_hi - prior_lo, 0.60,
-                                        facecolor=COLOR_PRIOR_BAND, edgecolor="none", zorder=1))
-        # Prior central
-        ax.scatter([prior_pct], [yi], marker="o", s=70, color=COLOR_REPORTED, zorder=4, label="_nolegend_")
+        box_color = COLOR_BOX_IN if in_band else COLOR_BOX_OUT
 
-        # Strict 95% CI as a whisker line
-        ax.plot([strict_lo, strict_hi], [yi - 0.05, yi - 0.05], color="#444444", linewidth=1.2, zorder=2)
-        # Strict point estimate (small triangle)
-        ax.scatter([strict_pct], [yi - 0.05], marker="v", s=35, color="#444444", zorder=3)
+        # Draw box-and-whisker using matplotlib bxp (pre-computed stats)
+        box_stats = [{
+            "whislo": whisker_lo,
+            "q1": strict,
+            "med": informed,
+            "q3": central,
+            "whishi": whisker_hi,
+            "fliers": [],
+        }]
+        bp = ax.bxp(box_stats, positions=[yi - 0.12], vert=False, widths=0.38,
+                     patch_artist=True, showfliers=False,
+                     boxprops=dict(facecolor=box_color, alpha=0.35, edgecolor=box_color, linewidth=1.5),
+                     medianprops=dict(color=COLOR_MEDIAN, linewidth=2.0),
+                     whiskerprops=dict(color="#555555", linewidth=1.0),
+                     capprops=dict(color="#555555", linewidth=1.0))
 
-        # Bayes(1,1) base case
-        ax.scatter([central], [yi + 0.18], marker="s", s=80, color=central_color, edgecolor="white", linewidth=1.0, zorder=4)
-        # Bayes(1,2) informed-prior alternative — only annotate if it differs visibly,
-        # offset slightly upward so it doesn't sit on top of the Bayes(1,1) square
-        if abs(informed - central) >= 1:
-            ax.scatter([informed], [yi + 0.32], marker="D", s=45, color="black", zorder=4)
+        # Prior: blue circle with 50% CI error bars, slightly below the box
+        ax.errorbar(prior_pct, yi + 0.22, xerr=[[prior_pct - prior_lo], [prior_hi - prior_pct]],
+                     fmt="o", color=COLOR_PRIOR, markersize=7, capsize=4, capthick=1.2,
+                     elinewidth=1.2, zorder=5)
 
-        # Gap annotation in a right-hand column at fixed x, aligned across rows
+        # Gap annotation
         gap = r["diff_central_minus_prior_pp"]
         if gap is not None:
-            sign = "+" if gap > 0 else ("" if gap == 0 else "")
-            ax.text(106, yi, f"{sign}{gap} pp", va="center", ha="left",
-                    fontsize=9, color=central_color, fontweight="bold" if abs(gap) >= 10 else "normal")
+            sign = "+" if gap > 0 else ""
+            ax.text(108, yi, f"{sign}{gap} pp", va="center", ha="left",
+                    fontsize=9, color=box_color, fontweight="bold" if abs(gap) >= 10 else "normal")
 
-    ax.set_yticks(y)
+    ax.set_yticks(y_positions)
     ax.set_yticklabels(retailers)
     ax.invert_yaxis()
-    ax.set_xlim(0, 105)
+    ax.set_xlim(0, 107)
     ax.set_xlabel("Cage-free share (%)")
-    ax.set_title(f"Listings cage-free central vs prior 50% CI  —  {tag}")
+    ax.set_title(f"Listings cage-free estimates vs prior  --  {tag}")
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     ax.grid(axis="x", alpha=0.25, linestyle=":")
     ax.set_axisbelow(True)
 
-    # Legend — explain marker semantics rather than colours per retailer.
+    # Legend
     legend_items = [
-        mpatches.Patch(facecolor=COLOR_PRIOR_BAND, label="Prior 50% CI (subjective band)"),
-        plt.Line2D([0], [0], marker="o", color=COLOR_REPORTED, markersize=8, linestyle="None", label="Prior central (reported / blended)"),
-        plt.Line2D([0], [0], marker="s", color=COLOR_INSIDE, markersize=8, linestyle="None", label="Listings Bayes(1,1) — inside 50% CI"),
-        plt.Line2D([0], [0], marker="s", color=COLOR_OUTSIDE, markersize=8, linestyle="None", label="Listings Bayes(1,1) — outside 50% CI"),
-        plt.Line2D([0], [0], marker="D", color="black", markersize=6, linestyle="None", label="Listings Bayes(1,2) informed prior"),
-        plt.Line2D([0], [0], marker="v", color="#444444", markersize=6, linestyle="None", label="Listings strict (Wilson 95% CI shown)"),
+        mpatches.Patch(facecolor=COLOR_BOX_IN, alpha=0.35, edgecolor=COLOR_BOX_IN,
+                       label="Listings range (strict to Bayes base) -- consistent"),
+        mpatches.Patch(facecolor=COLOR_BOX_OUT, alpha=0.35, edgecolor=COLOR_BOX_OUT,
+                       label="Listings range -- inconsistent with prior"),
+        plt.Line2D([0], [0], color=COLOR_MEDIAN, linewidth=2, label="Bayes(1,2) informed estimate"),
+        plt.Line2D([0], [0], color="#555555", linewidth=1.0,
+                   label="Wilson 95% CI whiskers"),
+        plt.Line2D([0], [0], marker="o", color=COLOR_PRIOR, markersize=7, linestyle="None",
+                   label="Prior central (50% CI error bars)"),
     ]
-    ax.legend(handles=legend_items, loc="lower center", bbox_to_anchor=(0.5, -0.32),
+    ax.legend(handles=legend_items, loc="lower center", bbox_to_anchor=(0.5, -0.35),
               ncol=2, frameon=False, fontsize=8)
 
     fig.tight_layout()
@@ -235,7 +216,7 @@ def main() -> None:
     out2 = out_dir / f"fig2_listings_vs_prior_{tag}.png"
 
     fig1_sku_mix_v2(summary_rows, out1, tag)
-    fig2_central_vs_prior(comparison_rows, out2, tag)
+    fig2_box_whisker(comparison_rows, out2, tag)
 
     print(f"Wrote {out1}")
     print(f"Wrote {out2}")
