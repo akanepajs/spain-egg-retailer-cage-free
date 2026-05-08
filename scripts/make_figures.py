@@ -117,8 +117,9 @@ def fig2_box_whisker(comparison_rows: list[dict], out: Path, tag: str) -> None:
     """
     rows = [r for r in comparison_rows
             if r.get("listings_central_pct") is not None
-            and r.get("prior_estimate_pct") is not None]
-    order = ["Mercadona", "Carrefour", "Lidl", "Eroski", "Caprabo", "DIA", "Eroski Group"]
+            and r.get("prior_estimate_pct") is not None
+            and r["retailer"] != "Eroski Group"]
+    order = ["Mercadona", "Carrefour", "Lidl", "Eroski", "Caprabo", "DIA"]
     rows = sorted(rows, key=lambda r: order.index(r["retailer"]) if r["retailer"] in order else 99)
 
     fig, ax = plt.subplots(figsize=(9, 4.5), dpi=300)

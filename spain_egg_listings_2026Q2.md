@@ -26,7 +26,6 @@ The **consistency test** asks whether each retailer's listings central (Bayesian
 | Eroski | 22 | 2/4/8/1/7 | **92** | 90 | 64 (43--80) | 43 (32--58) | +49 | **no** |
 | Caprabo | 19 | 5/3/9/0/2 | **99** | 99 | 89 (69--97) | 100 (95--100) | -1 | yes |
 | DIA | 10 | 1/1/4/0/4 | **95** | 91 | 60 (31--83) | 58 (52--63) | +37 | **no** |
-| **Eroski Grp** | **41** | 7/7/17/1/9 | **96** | 96 | 76 (61--86) | -- | -- | -- |
 
 *Bayes(1,1): Laplace-shrunk posterior on classified SKUs, unknowns allocated proportionally. Bayes(1,2): informed prior (mean 1/3, Spain national cage-free share). Strict: unknowns counted as not cage-free, Wilson 95% CI. Prior from EggTrack 2024, OBA May 2025 benchmark, and retailer disclosures.*
 
@@ -34,7 +33,7 @@ The **consistency test** asks whether each retailer's listings central (Bayesian
 
 **Mercadona is the largest negative gap.** Four of seven shell-egg SKUs carry the regulator-required `criadas en jaulas` ("caged hens") disclosure; two are `camperas` (free-range); one 24-pack is unclassified. The listings central of 34% is 31 pp below the reported 65%. A rough pack-size weighting (inferred from prices, since the API omits pack counts) yields 21--50% depending on how the unknown 24-pack is classified -- still well below 65%, so the gap is not explained by volume weighting alone. The most plausible reconciliation is that `camperas` SKUs dominate actual sales volume, or that corporate figures lag the current shelf state. EggTrack 2024 rates Mercadona "At risk"; OBA's May 2025 benchmark independently confirms the 65% self-report.
 
-**Eroski and DIA: priors look too pessimistic.** Eroski's 43% prior rests on an eight-year-old 2018 ESM baseline (the weakest prior in this analysis). Detail-page enrichment found 14 cage-free, 1 caged, 7 unknown; even a 50/50 split on unknowns gives ~75%, well outside the 32--58 band. DIA's strict metric (60%) matches its prior (58%) almost exactly, but the 4 unqualified own-brand packs are heavily category-correlated, so the truth likely lies between strict and Bayesian central for both retailers.
+**Eroski and DIA: priors look too pessimistic.** Eroski's 43% prior rests on an eight-year-old 2018 ESM baseline (the weakest prior in this analysis). Detail-page enrichment found 14 cage-free, 1 caged, 7 unknown; even a 50/50 split on unknowns gives ~75%, well outside the 32--58 band. DIA's strict metric (60%) matches its prior (58%) almost exactly, but the 4 unqualified own-brand packs are heavily category-correlated, so the truth likely lies between strict and Bayesian central for both retailers. Combined, Eroski and its Catalan subsidiary Caprabo list 41 shell-egg SKUs (7 organic, 7 free-range, 17 barn, 1 caged, 9 unknown).
 
 **Caprabo** (n=19, Eroski's Catalan subsidiary) is consistent with the prior (central 99% inside the 95--100 band). **Lidl** stays external-only: lidl.es does not list fresh shell eggs online.
 
