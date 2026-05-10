@@ -47,7 +47,7 @@ export function isShellEgg(product) {
   //     not standard on cooked-and-peeled hard-boiled packs even though they
   //     come from laying hens; treated as out of scope for the listing audit.
   const n = (product.name || "").toLowerCase();
-  if (/\bclara[s]? de huevo|claras? d'?ou|liquid egg/.test(n)) return false;
+  if (/\bclara[s]?\s+(?:de\s+)?huevo|\bclara[s]?\s+l[ií]quida|\bclaras? d'?ou|\bliquid egg/.test(n)) return false;
   if (/codorniz|codorniu|quail/.test(n)) return false;
   if (/\bcocidos?\b|\bcocido\b|\bcuits?\b|\bcuit\b|hard[\s-]?boiled/.test(n)) return false;
   return true;

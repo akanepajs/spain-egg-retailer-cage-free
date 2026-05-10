@@ -1,2 +1,9 @@
 node_modules/
-*.docx
+__pycache__/
+*.msi
+*.pdf
+versions/
+**/versions/
+*baseline*
+*Name clash*
+audit_results/

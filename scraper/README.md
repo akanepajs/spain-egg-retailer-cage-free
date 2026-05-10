@@ -31,6 +31,10 @@ scraper/
 npm install
 node run_scrape.mjs 2026-Q2     # writes data/raw/ + data/summary/
 node compare.mjs   2026-Q2      # writes data/comparison/
+
+# Figures (from project root, not scraper/)
+pip install -r scripts/requirements.txt
+python scripts/make_figures.py 2026-Q2   # writes fig1_*.png + fig2_*.png
 ```
 
 The quarter argument defaults to today's calendar quarter. Output files are keyed on the tag, so reruns of the same quarter overwrite. Programmatic retailers (Mercadona, Eroski, Caprabo, Lidl) re-fetch live each run; Carrefour and DIA read from on-disk browser snapshots that must be refreshed manually each quarter (see "Browser-mediated capture" below).
