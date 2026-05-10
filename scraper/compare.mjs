@@ -12,14 +12,14 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 //
 // Source: spain_egg_market_analysis.md (2026-Q2 prior task) — derived from
 // EggTrack 2024, OBA April 2025 audit, retailer corporate disclosures, and
-// (for Eroski) a 2018 ESM baseline blended with the Caprabo subsidiary share.
+// (for Eroski) a 2018 FRS baseline blended with the Caprabo subsidiary share.
 const REPORTED = {
-  "Mercadona":  { pct: 65,  lo: 62, hi: 68,  source: "Mercadona corporate; EggTrack 2024 = At risk",            commitment: "100% by end-2025 (slipped from end-2022)" },
+  "Mercadona":  { pct: 65,  lo: 62, hi: 68,  source: "Mercadona corporate; OBA May 2025 benchmark",            commitment: "100% by end-2025 (slipped from end-2022)" },
   "Carrefour":  { pct: 100, lo: 98, hi: 100, source: "OBA May 2025 audit; observatoriodebienestaranimal.org",     commitment: "100% fresh; ingredient eggs ~35%" },
   "Lidl":       { pct: 100, lo: 99, hi: 100, source: "EggTrack 2024 Leader; OBA May 2025 audit",                  commitment: "100% — first chain in Spain to sell only cage-free shell eggs" },
-  "Eroski":     { pct: 43,  lo: 32, hi: 58,  source: "Prior estimate: 35% (2018 baseline, ESM) + Caprabo 100% subsidiary blend", commitment: "100% by end-2024 (missed)" },
+  "Eroski":     { pct: 43,  lo: 32, hi: 58,  source: "Prior estimate: 35% (2018 baseline, FRS) + Caprabo 100% subsidiary blend", commitment: "100% by end-2024 (missed)" },
   "Caprabo":    { pct: 100, lo: 95, hi: 100, source: "Eroski 2022 sustainability report (Caprabo subsidiary 100% cage-free); part of Eroski Group", commitment: "Cage-free transition completed (per parent group disclosure)" },
-  "DIA":        { pct: 58,  lo: 52, hi: 63,  source: "DIA corporate (diacorporate.com); EggTrack 2024 = At risk", commitment: "100% by end-2025" },
+  "DIA":        { pct: 58,  lo: 52, hi: 63,  source: "DIA corporate (diacorporate.com); EggTrack 2024", commitment: "100% by end-2025" },
 };
 
 function csvEscape(v) {
@@ -45,37 +45,16 @@ function wilson95(k, n) {
 }
 const pct = x => x === null ? "" : Math.round(x * 100);
 
-// Bayesian-shrunk listings central with parameterised Beta(alpha, beta) prior.
-// Smooths the cage-free/caged ratio of *classified* SKUs, then allocates
-// unknown SKUs proportionally to the smoothed posterior mean.
-//
-// Why Bayesian shrinkage: a naive proportional split breaks at the small-n
-// edge cases where caged=0 (all unknowns flow to cage-free → 100% central)
-// or cage-free=0 (all unknowns flow to caged → 0% central). Adding alpha
-// virtual cage-free and beta virtual caged SKUs regularises the estimate.
-//
-// Two priors used in this analysis:
-//   - Beta(1, 1)   — Laplace, uninformative; prior mean 0.5. Base case.
-//   - Beta(1, 2)   — informed; prior mean 1/3 anchored to Spain's national
-//                    production-side cage-free share (~33%, WATTPoultry 2023).
-//                    Reflects "if you knew nothing about an unlabelled
-//                    Spanish egg SKU, your prior is that it is more likely
-//                    caged than cage-free." Same total weight (3) as
-//                    Beta(1,1)+1 so prior strength is comparable.
-//
-// Edge cases handled:
-//   - n=0 → null central
-//   - cf+caged=0 (all unknown) → posterior alpha/(alpha+beta), allocated to all
-//   - unknown=0 → central = cf / n (no shrinkage needed)
-function bayesianCentralBeta(cf, caged, unknown, alpha, beta) {
-  const n = cf + caged + unknown;
+// Two estimates used in this analysis:
+//   - CF (0%)  — unknowns treated as not cage-free (conservative lower
+//                    bound). Computed as strict cf/n ratio.
+//   - CF (33%) — fixed 33% allocation: each unknown SKU is counted as
+//                    0.33 cage-free. Anchored to Spain's national production-
+//                    side cage-free share (~33%, WATTPoultry 2023).
+function fixedAllocation33(cf, unknown, n) {
   if (n === 0) return null;
-  const p_cf = (cf + alpha) / (cf + caged + alpha + beta); // posterior mean
-  const new_cf = cf + unknown * p_cf;
-  return new_cf / n;
+  return (cf + unknown * 0.33) / n;
 }
-const bayesianCentral         = (cf, caged, unk) => bayesianCentralBeta(cf, caged, unk, 1, 1);
-const bayesianCentralInformed = (cf, caged, unk) => bayesianCentralBeta(cf, caged, unk, 1, 2);
 
 // Retailer-group rollup: which retailers belong to a single corporate group.
 const GROUPS = {
@@ -131,30 +110,22 @@ async function main() {
     const classified = n - (b.unknown || 0);
     const [resolvedLo, resolvedHi] = wilson95(cf, classified);
 
-    // "Listings central estimate" — base case is Beta(1,1) Laplace-shrunk:
-    // unknowns are allocated using a regularised cage-free probability
-    // (cf+1)/(cf+caged+2), which avoids the brittle 0/100 edge cases of
-    // naive proportional allocation when caged=0 or cf=0. As a robustness
-    // check we also report the unsmoothed proportional central (= resolved).
+    // CF (33%): fixed 33% allocation for unknowns.
+    // CF (0%): strict cf/n (conservative lower bound).
     const cfCount = b.cage_free_listings || 0;
-    const cagedCount = b.caged || 0;
     const unkCount = b.unknown || 0;
-    const central_bayes = bayesianCentral(cfCount, cagedCount, unkCount);
-    const central_bayes_pct = central_bayes === null ? null : Math.round(central_bayes * 100);
-    const central_informed = bayesianCentralInformed(cfCount, cagedCount, unkCount);
+    const central_informed = fixedAllocation33(cfCount, unkCount, n);
     const central_informed_pct = central_informed === null ? null : Math.round(central_informed * 100);
-    const central_proportional_pct = resolved; // mathematically identical to resolved
+    const central_proportional_pct = resolved;
 
-    // Apples-to-apples consistency test: does the listings central estimate
-    // fall within the prior 50% CI? (Prior CIs are subjective 50% bands per
-    // spain_egg_market_analysis.md methodology — even odds the truth is in
-    // that range. The listing central is treated as a point estimate here,
-    // not its own band.)
-    const inPrior50 = (central_bayes_pct !== null && ref.lo !== undefined)
-      ? (central_bayes_pct >= ref.lo && central_bayes_pct <= ref.hi)
+    // Consistency test: does the CF (33%) estimate fall within the
+    // prior 50% CI?
+    const inPrior50 = (central_informed_pct !== null && ref.lo !== undefined)
+      ? (central_informed_pct >= ref.lo && central_informed_pct <= ref.hi)
       : null;
 
-    const gapBayes = (central_bayes_pct !== null && reportedPct !== null) ? central_bayes_pct - reportedPct : null;
+    // Gap: CF (33%) minus prior
+    const gapBayes = (central_informed_pct !== null && reportedPct !== null) ? central_informed_pct - reportedPct : null;
 
     return {
       retailer: b.retailer,
@@ -162,8 +133,8 @@ async function main() {
       cage_free_skus: (b.organic ?? 0) + (b.free_range ?? 0) + (b.barn ?? 0),
       caged_skus: b.caged ?? 0,
       unknown_skus: b.unknown ?? 0,
-      listings_central_pct: central_bayes_pct,            // BASE CASE — Beta(1,1) Laplace-shrunk
-      listings_central_informed_pct: central_informed_pct, // SENSITIVITY — Beta(1,2), prior mean 1/3
+      listings_central_pct: central_informed_pct,           // fixed 33% allocation for unknowns
+      listings_central_informed_pct: central_informed_pct, // same (kept for schema compat)
       listings_central_proportional_pct: central_proportional_pct, // robustness check (= resolved)
       listings_cf_strict_pct: strict,
       listings_cf_strict_95ci: (strictLo !== null) ? `${pct(strictLo)}-${pct(strictHi)}` : "",
@@ -189,15 +160,14 @@ async function main() {
   await writeFile(`data/comparison/${tag}_comparison.csv`, toCSV(rows, cols), "utf8");
   await writeFile(`data/comparison/${tag}_comparison.json`, JSON.stringify(rows, null, 2), "utf8");
 
-  console.log(`Comparison ${tag} — listings central [Bayesian Beta(1,1)-shrunk] vs prior 50% CI`);
+  console.log(`Comparison ${tag} — CF (33%) vs prior 50% CI`);
   console.table(rows.map(r => ({
     retailer: r.retailer,
     n: r.shell_egg_listings,
     "cf/?/cage": `${r.cage_free_skus}/${r.unknown_skus}/${r.caged_skus}`,
-    central_bayes: r.listings_central_pct,
-    central_prop: r.listings_central_proportional_pct,
-    strict: r.listings_cf_strict_pct,
-    strict_95ci: r.listings_cf_strict_95ci,
+    "cf_0": r.listings_cf_strict_pct,
+    "cf_0_95ci": r.listings_cf_strict_95ci,
+    "cf_33": r.listings_central_informed_pct,
     prior: r.prior_estimate_pct,
     prior_50ci: r.prior_estimate_50ci,
     diff_pp: r.diff_central_minus_prior_pp,
@@ -206,10 +176,10 @@ async function main() {
 
   const decided = rows.filter(r => r.central_in_prior_50ci !== null);
   const inBand = decided.filter(r => r.central_in_prior_50ci === true);
-  console.log(`\nListings central [Bayesian] inside prior 50% CI: ${inBand.length}/${decided.length} retailers`);
+  console.log(`\nCF (33%) inside prior 50% CI: ${inBand.length}/${decided.length} retailers`);
   console.log(`  inside: ${inBand.map(r => r.retailer).join(", ") || "(none)"}`);
   const outside = decided.filter(r => r.central_in_prior_50ci === false);
-  console.log(`  outside: ${outside.map(r => `${r.retailer} (central ${r.listings_central_pct} vs prior ${r.prior_estimate_pct})`).join(", ") || "(none)"}`);
+  console.log(`  outside: ${outside.map(r => `${r.retailer} (CF 33%: ${r.listings_central_informed_pct} vs prior ${r.prior_estimate_pct})`).join(", ") || "(none)"}`);
 }
 
 await main();

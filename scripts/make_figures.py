@@ -1,7 +1,7 @@
 """Render the two report figures from scraper/data/comparison/<quarter>_comparison.json.
 
 Figure 1: stacked horizontal bar of SKU production-code mix by retailer.
-Figure 2: paired-dot chart of listings cage-free estimates vs prior 50% CI.
+Figure 2: box-whisker chart of CF (0%), CF (33%) posteriors vs prior.
 
 Run from project root:
     python scripts/make_figures.py 2026-Q2
@@ -18,6 +18,8 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+from scipy.stats import beta as beta_dist
+from scipy.optimize import minimize_scalar
 
 
 # Colorblind-friendly palette (Okabe-Ito-derived). Greens for cage-free tiers
@@ -29,7 +31,7 @@ COLOR_BARN       = "#88CCEE"   # pale blue (still cage-free)
 COLOR_CAGED      = "#CC6677"   # muted red
 COLOR_UNKNOWN    = "#BBBBBB"   # neutral grey
 COLOR_PRIOR      = "#332288"   # navy for prior central + CI
-COLOR_STRICT     = "#DDAA33"   # amber for strict-estimate triangles
+COLOR_BAYES0     = "#DDAA33"   # amber for CF (0%) boxes
 
 
 def quarter_tag_default() -> str:
@@ -49,7 +51,8 @@ def fig1_sku_mix_v2(summary_rows: list[dict], out: Path, tag: str) -> None:
     (no shell-egg listings online) and the Eroski Group rollup.
     """
     rows = [r for r in summary_rows if r["retailer"] != "Eroski Group" and (r.get("shell_egg_listings") or 0) > 0]
-    rows = sorted(rows, key=lambda r: r["shell_egg_listings"], reverse=True)
+    order = ["Mercadona", "Carrefour", "Eroski", "Caprabo", "DIA"]
+    rows = sorted(rows, key=lambda r: order.index(r["retailer"]) if r["retailer"] in order else 99)
 
     retailers = [r["retailer"] for r in rows]
     n_list    = [r["shell_egg_listings"] for r in rows]
@@ -104,63 +107,151 @@ def fig1_sku_mix_v2(summary_rows: list[dict], out: Path, tag: str) -> None:
     plt.close(fig)
 
 
-def fig2_paired_dots(comparison_rows: list[dict], out: Path, tag: str) -> None:
-    """Paired-dot chart: listings estimates vs prior.
+def fit_beta_to_prior(central_pct: float, lo_pct: float, hi_pct: float):
+    """Fit Beta(a, b) to a prior defined by central + 50% CI.
 
-    For each retailer with both listings and a prior:
-      - Green square = Bayes(1,2) informed estimate (prior mean 1/3)
-      - Amber triangle = strict estimate, with Wilson 95% CI whiskers
-      - Blue circle = prior central, with 50% CI error bars
-      - Gap annotation in pp on the right margin
+    Constrains mean = central_pct/100, then optimizes shape parameter `a`
+    so that the Beta IQR (Q25-Q75) matches the stated 50% CI (lo-hi).
+    Returns (a, b) or None if fitting fails.
+    """
+    target_mean = central_pct / 100.0
+    target_q25 = lo_pct / 100.0
+    target_q75 = hi_pct / 100.0
+
+    # Guard: mean at 0 or 1 breaks the Beta parameterization.
+    if target_mean <= 0.001 or target_mean >= 0.999:
+        return None
+
+    def objective(log_a):
+        a = max(0.01, float(2 ** log_a))
+        b = a * (1.0 - target_mean) / target_mean
+        if b <= 0.01:
+            return 1e6
+        q25 = beta_dist.ppf(0.25, a, b)
+        q75 = beta_dist.ppf(0.75, a, b)
+        return (q25 - target_q25) ** 2 + (q75 - target_q75) ** 2
+
+    result = minimize_scalar(objective, bounds=(-3, 12), method="bounded")
+    a = max(0.01, float(2 ** result.x))
+    b = a * (1.0 - target_mean) / target_mean
+    if b <= 0.01:
+        return None
+    return a, b
+
+
+def fig2_combined(comparison_rows: list[dict], out: Path, tag: str) -> None:
+    """Box-whisker chart: prior, CF (0%), CF (33%).
+
+    Per retailer, three horizontal box-whiskers:
+      - Blue box: prior (Beta fitted to central + 50% CI), IQR + 95% CI
+      - Amber box: CF (0%) posterior Beta(cf+1, n-cf+1), IQR + 95% CI
+      - Green box: CF (33%) posterior for total CF share, IQR + 95% CI
+      - Gap annotation (CF (33%) minus prior) on the right margin
     """
     rows = [r for r in comparison_rows
-            if r.get("listings_central_pct") is not None
+            if (r.get("shell_egg_listings") or 0) > 0
             and r.get("prior_estimate_pct") is not None
             and r["retailer"] != "Eroski Group"]
-    order = ["Mercadona", "Carrefour", "Lidl", "Eroski", "Caprabo", "DIA"]
+    order = ["Mercadona", "Carrefour", "Eroski", "Caprabo", "DIA"]
     rows = sorted(rows, key=lambda r: order.index(r["retailer"]) if r["retailer"] in order else 99)
 
-    fig, ax = plt.subplots(figsize=(9, 4.0), dpi=300)
-    retailers = [r["retailer"] for r in rows]
-    y_positions = list(range(len(retailers)))
+    prior_bxp: list[dict] = []
+    bayes0_bxp: list[dict] = []
+    bayes33_bxp: list[dict] = []
+    prior_fit_failed: list[bool] = []
 
-    for yi, r in zip(y_positions, rows):
+    for r in rows:
+        n = r["shell_egg_listings"]
+        cf = r["cage_free_skus"]
+        caged = r["caged_skus"]
+        unknown = r["unknown_skus"]
+
+        # --- Prior box-whisker (fitted Beta) ---
         prior_pct = r["prior_estimate_pct"]
         prior_lo, prior_hi = (int(s) for s in r["prior_estimate_50ci"].split("-"))
-        central = r["listings_central_pct"]
-        informed = r.get("listings_central_informed_pct", central)
-        strict = r["listings_cf_strict_pct"]
-
-        strict_ci_str = r.get("listings_cf_strict_95ci", "")
-        if strict_ci_str:
-            wilson_lo, wilson_hi = (int(s) for s in strict_ci_str.split("-"))
+        fit = fit_beta_to_prior(prior_pct, prior_lo, prior_hi)
+        if fit is not None:
+            a_p, b_p = fit
+            prior_bxp.append({
+                "med": beta_dist.ppf(0.50, a_p, b_p) * 100,
+                "q1": beta_dist.ppf(0.25, a_p, b_p) * 100,
+                "q3": beta_dist.ppf(0.75, a_p, b_p) * 100,
+                "whislo": max(0, beta_dist.ppf(0.025, a_p, b_p) * 100),
+                "whishi": min(100, beta_dist.ppf(0.975, a_p, b_p) * 100),
+                "fliers": [], "label": "",
+            })
+            prior_fit_failed.append(False)
         else:
-            wilson_lo, wilson_hi = strict, strict
+            # Fallback: degenerate box at central with 50% CI as IQR
+            prior_bxp.append({
+                "med": prior_pct, "q1": prior_lo, "q3": prior_hi,
+                "whislo": max(0, prior_lo - (prior_hi - prior_lo)),
+                "whishi": min(100, prior_hi + (prior_hi - prior_lo)),
+                "fliers": [], "label": "",
+            })
+            prior_fit_failed.append(True)
 
-        # Strict estimate with Wilson 95% CI
-        ax.errorbar(strict, yi - 0.18, xerr=[[strict - wilson_lo], [wilson_hi - strict]],
-                     fmt="^", color=COLOR_STRICT, markersize=7, capsize=4, capthick=1.2,
-                     elinewidth=1.2, zorder=4)
+        # --- CF (0%): unknowns treated as caged ---
+        a_s, b_s = cf + 1, n - cf + 1
+        bayes0_bxp.append({
+            "med": beta_dist.ppf(0.50, a_s, b_s) * 100,
+            "q1": beta_dist.ppf(0.25, a_s, b_s) * 100,
+            "q3": beta_dist.ppf(0.75, a_s, b_s) * 100,
+            "whislo": beta_dist.ppf(0.025, a_s, b_s) * 100,
+            "whishi": beta_dist.ppf(0.975, a_s, b_s) * 100,
+            "fliers": [], "label": "",
+        })
 
-        # Listings informed estimate (no whiskers -- point estimate only)
-        ax.plot(informed, yi, "s", color=COLOR_ORGANIC, markersize=8, zorder=5)
+        # --- CF (33%): binomial posterior with effective cf = cf + unknown/3 ---
+        cf_33 = cf + unknown / 3
+        a_33, b_33 = cf_33 + 1, n - cf_33 + 1
+        bayes33_bxp.append({
+            "med": beta_dist.ppf(0.50, a_33, b_33) * 100,
+            "q1": beta_dist.ppf(0.25, a_33, b_33) * 100,
+            "q3": beta_dist.ppf(0.75, a_33, b_33) * 100,
+            "whislo": beta_dist.ppf(0.025, a_33, b_33) * 100,
+            "whishi": beta_dist.ppf(0.975, a_33, b_33) * 100,
+            "fliers": [], "label": "",
+        })
 
-        # Prior central with 50% CI error bars
-        ax.errorbar(prior_pct, yi + 0.18, xerr=[[prior_pct - prior_lo], [prior_hi - prior_pct]],
-                     fmt="o", color=COLOR_PRIOR, markersize=7, capsize=4, capthick=1.2,
-                     elinewidth=1.2, zorder=5)
+    n_ret = len(rows)
+    fig, ax = plt.subplots(figsize=(10, 5.0), dpi=300)
 
-        # Gap annotation (informed minus prior)
-        gap = r["diff_central_minus_prior_pp"]
-        if gap is not None:
-            sign = "+" if gap > 0 else ""
-            ax.text(108, yi, f"{sign}{gap} pp", va="center", ha="left",
-                    fontsize=9, color="#333333", fontweight="bold" if abs(gap) >= 10 else "normal")
+    # Three rows per retailer: prior (top), Bayes 0% (middle), Bayes 33% (bottom)
+    off = 0.28
+    bw = 0.15
+    prior_pos   = [i - off for i in range(n_ret)]
+    bayes0_pos  = [i       for i in range(n_ret)]
+    bayes33_pos = [i + off for i in range(n_ret)]
 
-    ax.set_yticks(y_positions)
-    ax.set_yticklabels(retailers)
+    ax.bxp(prior_bxp, positions=prior_pos, vert=False, widths=bw,
+           patch_artist=True,
+           boxprops=dict(facecolor=COLOR_PRIOR, alpha=0.35, edgecolor=COLOR_PRIOR, linewidth=1.0),
+           medianprops=dict(color="#333333", linewidth=1.3),
+           whiskerprops=dict(color=COLOR_PRIOR, linewidth=1.0),
+           capprops=dict(color=COLOR_PRIOR, linewidth=1.0),
+           flierprops=dict(marker=""))
+
+    ax.bxp(bayes0_bxp, positions=bayes0_pos, vert=False, widths=bw,
+           patch_artist=True,
+           boxprops=dict(facecolor=COLOR_BAYES0, alpha=0.40, edgecolor=COLOR_BAYES0, linewidth=1.0),
+           medianprops=dict(color="#333333", linewidth=1.3),
+           whiskerprops=dict(color=COLOR_BAYES0, linewidth=1.0),
+           capprops=dict(color=COLOR_BAYES0, linewidth=1.0),
+           flierprops=dict(marker=""))
+
+    ax.bxp(bayes33_bxp, positions=bayes33_pos, vert=False, widths=bw,
+           patch_artist=True,
+           boxprops=dict(facecolor=COLOR_ORGANIC, alpha=0.40, edgecolor=COLOR_ORGANIC, linewidth=1.0),
+           medianprops=dict(color="#333333", linewidth=1.3),
+           whiskerprops=dict(color=COLOR_ORGANIC, linewidth=1.0),
+           capprops=dict(color=COLOR_ORGANIC, linewidth=1.0),
+           flierprops=dict(marker=""))
+
+    ax.set_yticks(range(n_ret))
+    ax.set_yticklabels([f"{r['retailer']} (n={r['shell_egg_listings']})" for r in rows])
     ax.invert_yaxis()
-    ax.set_xlim(0, 107)
+    ax.set_xlim(0, 105)
     ax.set_xlabel("Cage-free share (%)")
     ax.set_title(f"Listings estimates vs prior  --  {tag}")
     ax.spines["top"].set_visible(False)
@@ -168,16 +259,15 @@ def fig2_paired_dots(comparison_rows: list[dict], out: Path, tag: str) -> None:
     ax.grid(axis="x", alpha=0.25, linestyle=":")
     ax.set_axisbelow(True)
 
-    # Legend
     legend_items = [
-        plt.Line2D([0], [0], marker="s", color=COLOR_ORGANIC, markersize=8, linestyle="None",
-                   label="Listings Bayes(1,2) informed estimate"),
-        plt.Line2D([0], [0], marker="^", color=COLOR_STRICT, markersize=7, linestyle="None",
-                   label="Listings strict (Wilson 95% CI)"),
-        plt.Line2D([0], [0], marker="o", color=COLOR_PRIOR, markersize=7, linestyle="None",
-                   label="Prior central (50% CI)"),
+        mpatches.Patch(facecolor=COLOR_PRIOR, alpha=0.35, edgecolor=COLOR_PRIOR,
+                       label="Prior (fitted Beta, IQR + 95% CI)"),
+        mpatches.Patch(facecolor=COLOR_BAYES0, alpha=0.40, edgecolor=COLOR_BAYES0,
+                       label="CF (0%) (IQR + 95% CI)"),
+        mpatches.Patch(facecolor=COLOR_ORGANIC, alpha=0.40, edgecolor=COLOR_ORGANIC,
+                       label="CF (33%) (IQR + 95% CI)"),
     ]
-    ax.legend(handles=legend_items, loc="lower center", bbox_to_anchor=(0.5, -0.25),
+    ax.legend(handles=legend_items, loc="lower center", bbox_to_anchor=(0.45, -0.25),
               ncol=3, frameon=False, fontsize=8)
 
     fig.tight_layout()
@@ -197,7 +287,7 @@ def main() -> None:
     out2 = out_dir / f"fig2_listings_vs_prior_{tag}.png"
 
     fig1_sku_mix_v2(summary_rows, out1, tag)
-    fig2_paired_dots(comparison_rows, out2, tag)
+    fig2_combined(comparison_rows, out2, tag)
 
     print(f"Wrote {out1}")
     print(f"Wrote {out2}")

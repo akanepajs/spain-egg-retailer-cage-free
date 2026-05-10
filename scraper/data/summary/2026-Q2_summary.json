@@ -44,14 +44,14 @@
   {
     "retailer": "Eroski",
     "total_listings": 26,
-    "shell_egg_listings": 22,
+    "shell_egg_listings": 20,
     "organic": 2,
     "free_range": 4,
     "barn": 8,
     "caged": 1,
-    "unknown": 7,
+    "unknown": 5,
     "cage_free_listings": 14,
-    "cage_free_share_strict_pct": 64,
+    "cage_free_share_strict_pct": 70,
     "cage_free_share_resolved_pct": 93,
     "note": ""
   },

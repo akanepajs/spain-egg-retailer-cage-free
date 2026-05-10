@@ -1028,7 +1028,7 @@
     "eu_code": null,
     "classify_source": "unknown",
     "production_label": "unknown",
-    "is_shell_egg": true,
+    "is_shell_egg": false,
     "cage_free": null
   },
   {
@@ -1060,7 +1060,7 @@
     "eu_code": null,
     "classify_source": "unknown",
     "production_label": "unknown",
-    "is_shell_egg": true,
+    "is_shell_egg": false,
     "cage_free": null
   },
   {
